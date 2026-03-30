@@ -117,16 +117,48 @@ export function applyPlural(
 /** Shorter 3sg-style endings first when posSalience is high. */
 const VERB_3SG_ORDER = ["ă", "e", "ește", "ăște", "ează", "uiește"];
 
+function verbSuffixOrderForStem(
+  stem: string,
+  rng: PRNG,
+  posSalience: number,
+): string[] {
+  const s = stem.normalize("NFC").toLowerCase();
+  const last = s[s.length - 1] ?? "";
+
+  // Romanian has no Hungarian-style vowel harmony, but verb allomorphy is
+  // stem-sensitive (e.g. vowel stems often surface with -iește/-uiește).
+  if (/[iî]$/u.test(s)) {
+    return rng() < 0.55 + 0.3 * posSalience
+      ? ["iește", "ește", "uiește", "ăște", "ează", "ă", "e"]
+      : shuffleReturn(rng, ["iește", ...VERB_3SG_ORDER]);
+  }
+  if (last === "u") {
+    return rng() < 0.55 + 0.3 * posSalience
+      ? ["uiește", "ește", "iește", "ează", "ăște", "ă", "e"]
+      : shuffleReturn(rng, ["uiește", ...VERB_3SG_ORDER]);
+  }
+  if (s.includes("â") || s.includes("î")) {
+    return rng() < 0.5 + 0.3 * posSalience
+      ? ["ăște", "ește", "ează", "ă", "e", "uiește"]
+      : shuffleReturn(rng, [...VERB_3SG_ORDER]);
+  }
+  if ("aeăo".includes(last)) {
+    return rng() < 0.5 + 0.35 * posSalience
+      ? ["ează", "ește", "ăște", "ă", "e", "uiește"]
+      : shuffleReturn(rng, [...VERB_3SG_ORDER]);
+  }
+  return rng() < 0.45 + 0.5 * posSalience
+    ? [...VERB_3SG_ORDER]
+    : shuffleReturn(rng, VERB_3SG_ORDER);
+}
+
 export function finiteVerbFromStem(
   stem: string,
   rng: PRNG,
   m: CorpusRuntimeModel | null,
   posSalience: number,
 ): string {
-  const order =
-    rng() < 0.45 + 0.5 * posSalience
-      ? [...VERB_3SG_ORDER]
-      : shuffleReturn(rng, VERB_3SG_ORDER);
+  const order = verbSuffixOrderForStem(stem, rng, posSalience);
   for (const suf of order) {
     const w =
       stem.endsWith("e") && suf.startsWith("e")

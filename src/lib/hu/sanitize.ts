@@ -2,6 +2,7 @@ import { genWordFromCorpus, type CorpusRuntimeModel } from "../corpusModel";
 import type { PRNG } from "../markov";
 import {
   capitalizeHu,
+  HU_CASE_SUFFIX,
   HU_FORBIDDEN_SENTENCE_FINAL,
   HU_REQUIRES_QUESTION_MARK_INITIAL,
 } from "./closedClass";
@@ -104,6 +105,15 @@ export function finalizeHungarianSentence(
     }
     if (!fixedCore) continue;
     words[i] = `${lead}${fixedCore}${trail}`;
+  }
+
+  for (let i = 1; i < words.length; i++) {
+    const k = wordGrammarKey(words[i]!);
+    if (!HU_CASE_SUFFIX.includes(k)) continue;
+    const prev = words[i - 1]!;
+    words[i - 1] = `${prev}${k}`;
+    words.splice(i, 1);
+    i -= 1;
   }
 
   const joined = words.join(" ");

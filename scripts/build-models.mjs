@@ -1,7 +1,7 @@
 /**
- * Builds constrained character / token n-gram JSON for HU / RO (v4).
+ * Builds constrained character / token n-gram JSON for HU / RO / EN (v4).
  * Run: npm run build-models
- * Requires network. Output: public/models/{hu,ro}.json
+ * Requires network. Output: public/models/{hu,ro,en}.json
  * Wikipedia text: CC BY-SA — attribute if redistributing verbatim extracts.
  */
 
@@ -39,10 +39,12 @@ const TOP_TRI = 36;
 const TOP_BI = 56;
 const MIN_UNI = 2;
 const RO_VV_MIN = 2;
+const EN_VV_MIN = 2;
 
 /** Letters + space only after cleaning (lowercase NFC). */
 const RO_ALPHABET = new Set("aăâbcdefghiîjklmnopqrsștțuvwxyz ".split(""));
 const HU_ALPHABET = new Set("aábcdeéfghiíjklmnoóöőpqrstuúüűvwxyz ".split(""));
+const EN_ALPHABET = new Set("abcdefghijklmnopqrstuvwxyz ".split(""));
 
 /** Attested Romanian vowel adjacencies — union with corpus. */
 const RO_VOWEL_PAIR_SEED = [
@@ -69,6 +71,39 @@ const RO_VOWEL_PAIR_SEED = [
   "ou",
 ];
 
+/** English vowel-letter adjacencies — union with corpus-mined pairs. */
+const EN_VOWEL_PAIR_SEED = [
+  "aa",
+  "ae",
+  "ai",
+  "ao",
+  "au",
+  "aw",
+  "ay",
+  "ea",
+  "ee",
+  "ei",
+  "eo",
+  "eu",
+  "ew",
+  "ey",
+  "ia",
+  "ie",
+  "io",
+  "iu",
+  "oa",
+  "oe",
+  "oi",
+  "oo",
+  "ou",
+  "ow",
+  "oy",
+  "ua",
+  "ue",
+  "ui",
+  "uy",
+];
+
 function normalizeRo(text) {
   return text
     .normalize("NFC")
@@ -79,6 +114,10 @@ function normalizeRo(text) {
 }
 
 function normalizeHu(text) {
+  return text.normalize("NFC");
+}
+
+function normalizeEn(text) {
   return text.normalize("NFC");
 }
 
@@ -156,21 +195,74 @@ async function fetchExtracts(host, titles) {
 }
 
 function prepareCorpusChunk(chunk, locale) {
-  let norm = locale === "ro" ? normalizeRo(chunk) : normalizeHu(chunk);
+  let norm =
+    locale === "ro"
+      ? normalizeRo(chunk)
+      : locale === "en"
+        ? normalizeEn(chunk)
+        : normalizeHu(chunk);
   norm = norm.toLowerCase();
   norm = stripNoiseToSpace(norm);
   norm = norm.replace(/[0-9]+/g, " ");
-  const allowed = locale === "ro" ? RO_ALPHABET : HU_ALPHABET;
+  const allowed =
+    locale === "ro" ? RO_ALPHABET : locale === "en" ? EN_ALPHABET : HU_ALPHABET;
   norm = filterCharset(norm, allowed);
   return norm.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Keep sentence boundaries for snippet mining while still enforcing alphabet hygiene.
+ * Used only for `snippets`, not for n-gram counting.
+ */
+function prepareSnippetChunk(chunk, locale) {
+  let norm =
+    locale === "ro"
+      ? normalizeRo(chunk)
+      : locale === "en"
+        ? normalizeEn(chunk)
+        : normalizeHu(chunk);
+  norm = norm.toLowerCase();
+  norm = stripNoiseToSpace(norm);
+  norm = norm.replace(/[0-9]+/g, " ");
+  const allowedLetters =
+    locale === "ro" ? RO_ALPHABET : locale === "en" ? EN_ALPHABET : HU_ALPHABET;
+  let out = "";
+  for (const ch of norm) {
+    if (ch === "\n") {
+      out += "\n";
+      continue;
+    }
+    if (ch === "." || ch === "!" || ch === "?" || ch === "-" || ch === "—") {
+      out += ch;
+      continue;
+    }
+    if (allowedLetters.has(ch)) {
+      out += ch;
+      continue;
+    }
+    out += " ";
+  }
+  out = out
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t\f\v]+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+  return out.trim();
 }
 
 function collectCorpusFallback(locale) {
   const p = path.join(ROOT, "corpora", `fallback-${locale}.txt`);
   const raw = fs.readFileSync(p, "utf8");
-  const once = prepareCorpusChunk(raw, locale);
-  const repeated = Array.from({ length: 400 }, () => once).join("\n\n");
-  return repeated.slice(0, MAX_CORPUS_CHARS);
+  const onceModel = prepareCorpusChunk(raw, locale);
+  const onceSnippet = prepareSnippetChunk(raw, locale);
+  const model = Array.from({ length: 400 }, () => onceModel)
+    .join("\n\n")
+    .slice(0, MAX_CORPUS_CHARS);
+  const snippets = Array.from({ length: 220 }, () => onceSnippet)
+    .join("\n\n")
+    .slice(0, MAX_CORPUS_CHARS);
+  return { model, snippets };
 }
 
 async function collectCorpus(host, locale) {
@@ -179,10 +271,11 @@ async function collectCorpus(host, locale) {
     return collectCorpusFallback(locale);
   }
   try {
-    const parts = [];
-    let total = 0;
+    const modelParts = [];
+    const snippetParts = [];
+    let totalModel = 0;
     let batch = 0;
-    while (total < MAX_CORPUS_CHARS && batch < 140) {
+    while (totalModel < MAX_CORPUS_CHARS && batch < 140) {
       const ru = new URL(`https://${host}/w/api.php`);
       ru.searchParams.set("action", "query");
       ru.searchParams.set("format", "json");
@@ -197,13 +290,18 @@ async function collectCorpus(host, locale) {
         await new Promise((r) => setTimeout(r, 250));
         continue;
       }
-      const norm = prepareCorpusChunk(chunk, locale);
-      parts.push(norm);
-      total += norm.length;
+      const normModel = prepareCorpusChunk(chunk, locale);
+      const normSnippet = prepareSnippetChunk(chunk, locale);
+      modelParts.push(normModel);
+      snippetParts.push(normSnippet);
+      totalModel += normModel.length;
       batch += 1;
       await new Promise((r) => setTimeout(r, 650));
     }
-    return parts.join("\n\n").slice(0, MAX_CORPUS_CHARS);
+    return {
+      model: modelParts.join("\n\n").slice(0, MAX_CORPUS_CHARS),
+      snippets: snippetParts.join("\n\n").slice(0, MAX_CORPUS_CHARS),
+    };
   } catch (e) {
     console.error(
       `  Wikipedia failed for ${locale}; using corpora/fallback-${locale}.txt (${e?.message ?? e})`,
@@ -267,17 +365,43 @@ function mergeRoVvSeed(map) {
   }
 }
 
+function mergeEnVvSeed(map) {
+  for (const p of EN_VOWEL_PAIR_SEED) {
+    if (p.length !== 2) continue;
+    map.set(p, (map.get(p) ?? 0) + EN_VV_MIN);
+  }
+}
+
 /** Short clean clauses for sentence-surgery path (native spelling only). */
 function mineSnippets(raw, locale) {
-  const alph = locale === "ro" ? RO_ALPHABET : HU_ALPHABET;
+  const alph =
+    locale === "ro" ? RO_ALPHABET : locale === "en" ? EN_ALPHABET : HU_ALPHABET;
   const merged = raw.replace(/\n+/g, " ");
-  const chunks = merged.split(/[.!?]+/);
+  let chunks = merged.split(/[.!?]+/);
+  if (chunks.length < 8) {
+    // Fallback for corpora that are line-delimited and punctuation-light.
+    chunks = raw.split(/\n+/);
+  }
   const out = [];
+  const pushWords = (words) => {
+    if (words.length < 5) return;
+    if (words.length <= 16) {
+      out.push(words.join(" "));
+      return;
+    }
+    // Long clauses: take deterministic overlapping windows.
+    for (let i = 0; i < words.length && out.length < 240; i += 6) {
+      const w = words.slice(i, i + 12);
+      if (w.length >= 5) out.push(w.join(" "));
+      if (i + 12 >= words.length) break;
+    }
+  };
+
   for (const chunk of chunks) {
     const s = chunk.trim();
-    if (s.length < 15 || s.length > 280) continue;
+    if (s.length < 15 || s.length > 520) continue;
     const words = s.split(/\s+/).filter((w) => w.length > 0);
-    if (words.length < 5 || words.length > 16) continue;
+    if (words.length < 5) continue;
     let ok = true;
     for (const w of words) {
       const lw = w.toLowerCase().normalize("NFC");
@@ -291,7 +415,7 @@ function mineSnippets(raw, locale) {
       if (!ok) break;
     }
     if (!ok) continue;
-    out.push(words.join(" "));
+    pushWords(words);
     if (out.length >= 240) break;
   }
   return out.slice(0, 140);
@@ -316,6 +440,28 @@ async function buildRo(raw) {
     maxConsStreak: stats.maxConsStreak,
     maxVowStreak: stats.maxVowStreak,
     roVowelPairs: roVVObj,
+  };
+}
+
+async function buildEn(raw) {
+  const words = wordsFromCorpus(raw, "en");
+  const stats = analyzeCorpusWords(words, "en");
+  mergeEnVvSeed(stats.roVV);
+  const enVVObj = mapToRecordMin(stats.roVV, EN_VV_MIN);
+  const { uni, bi, tri } = countNgrams(raw);
+  return {
+    v: 4,
+    locale: "en",
+    encoding: "chars",
+    alphabet: [...EN_ALPHABET].filter((c) => c !== " ").sort().join("") + " ",
+    uni: pruneUni(uni),
+    bi: toJsonRows(bi, TOP_BI),
+    tri: toJsonRows(tri, TOP_TRI),
+    first: mapToRecordAll(stats.first),
+    last: mapToRecordAll(stats.last),
+    maxConsStreak: stats.maxConsStreak,
+    maxVowStreak: stats.maxVowStreak,
+    roVowelPairs: enVVObj,
   };
 }
 
@@ -353,14 +499,16 @@ async function buildHu(raw) {
 
 /**
  * @param {Record<string, unknown>} model
- * @param {'hu'|'ro'} locale
+ * @param {'hu'|'ro'|'en'} locale
  * @param {string} raw filtered corpus (same pipeline as n-grams)
  */
-function attachWordStatsAndLinguistics(model, locale, raw) {
+function attachWordStatsAndLinguistics(model, locale, raw, snippetRaw) {
   const sample = mineWordsFromCorpus(raw.replace(/\n+/g, " "));
   const lens = wordLengthPercentiles(sample);
   const maxG = Math.max(5, Math.min(12, lens.p82));
   const rules = rulesForLocale(locale);
+  const snippets = mineSnippets(snippetRaw, locale);
+  console.error(`  snippets mined (${locale}): ${snippets.length}`);
   return {
     ...model,
     wordStats: {
@@ -379,28 +527,39 @@ function attachWordStatsAndLinguistics(model, locale, raw) {
       visualSubstitutes: rules.visualSubstitutes,
       article: rules.article,
     },
-    snippets: mineSnippets(raw, locale),
+    snippets,
   };
 }
 
 async function buildLocale(locale, host) {
   console.error(`Collecting ${locale} from ${host} …`);
-  let wiki = await collectCorpus(host, locale);
+  const wiki = await collectCorpus(host, locale);
   let litPrep = "";
+  let litSnippet = "";
   if (process.env.GLOSSA_OFFLINE !== "1") {
     const litRaw = await fetchLiteraryBlend(locale);
     if (litRaw.length > 0) {
       litPrep = prepareCorpusChunk(litRaw, locale);
+      litSnippet = prepareSnippetChunk(litRaw, locale);
       console.error(`  + literary blend chars (filtered): ${litPrep.length}`);
     }
   }
-  const raw = [wiki, litPrep].filter(Boolean).join("\n\n").slice(0, MAX_CORPUS_CHARS);
+  const raw = [wiki.model, litPrep].filter(Boolean).join("\n\n").slice(0, MAX_CORPUS_CHARS);
+  const snippetRaw = [wiki.snippets, litSnippet]
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, MAX_CORPUS_CHARS);
   if (raw.length < 10_000) {
     throw new Error(`${locale}: corpus too small (${raw.length}).`);
   }
   console.error(`  chars (filtered, merged): ${raw.length}`);
-  let model = locale === "hu" ? await buildHu(raw) : await buildRo(raw);
-  model = attachWordStatsAndLinguistics(model, locale, raw);
+  let model =
+    locale === "hu"
+      ? await buildHu(raw)
+      : locale === "en"
+        ? await buildEn(raw)
+        : await buildRo(raw);
+  model = attachWordStatsAndLinguistics(model, locale, raw, snippetRaw);
   return model;
 }
 
@@ -408,12 +567,16 @@ async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const hu = await buildLocale("hu", "hu.wikipedia.org");
   const ro = await buildLocale("ro", "ro.wikipedia.org");
+  const en = await buildLocale("en", "en.wikipedia.org");
   fs.writeFileSync(path.join(OUT_DIR, "hu.json"), JSON.stringify(hu), "utf8");
   fs.writeFileSync(path.join(OUT_DIR, "ro.json"), JSON.stringify(ro), "utf8");
+  fs.writeFileSync(path.join(OUT_DIR, "en.json"), JSON.stringify(en), "utf8");
   const hs = (await fs.promises.stat(path.join(OUT_DIR, "hu.json"))).size;
   const rs = (await fs.promises.stat(path.join(OUT_DIR, "ro.json"))).size;
+  const es = (await fs.promises.stat(path.join(OUT_DIR, "en.json"))).size;
   console.error(`Wrote public/models/hu.json (${hs} bytes)`);
   console.error(`Wrote public/models/ro.json (${rs} bytes)`);
+  console.error(`Wrote public/models/en.json (${es} bytes)`);
 }
 
 main().catch((e) => {

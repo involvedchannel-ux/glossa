@@ -22,6 +22,8 @@ export const HU_CASE_SUFFIX = [
   "ben",
   "ba",
   "be",
+  "ról",
+  "ről",
   "hoz",
   "hez",
   "höz",

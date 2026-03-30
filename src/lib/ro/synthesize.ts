@@ -16,14 +16,17 @@ import {
   capitalizeRo,
   pick,
   RO_AUX,
-  RO_CONJ,
+  RO_CONJ_COMMA,
+  RO_CONJ_NO_COMMA,
   RO_COPULA_FIN,
   RO_DEM,
   RO_DET_INDEF,
   RO_PREP,
   RO_PRON_SUBJ,
   RO_Q,
+  RO_SUBORD_AFTER_COMMA,
 } from "./closedClass";
+import { finalizeRomanianParagraph } from "./sanitize";
 import {
   applyDefinite,
   applyPlural,
@@ -81,22 +84,18 @@ function buildPickers(
   };
 }
 
-function capitalizeSentence(s: string): string {
-  const t = s.trim();
-  if (!t) return t;
-  const g = [...t];
-  return capitalizeRo(g[0]!) + g.slice(1).join("");
+function declarativeEndPunct(rng: PRNG, _t: RoTuning, q: QualityMix): string {
+  if (rng() < q.punctuationRhythm * 0.42) {
+    return rng() < 0.1 ? "!" : ".";
+  }
+  return ".";
 }
 
-function endPunct(rng: PRNG, t: RoTuning, q: QualityMix): string {
-  if (rng() < q.punctuationRhythm * 0.42) {
-    return sampleClausePunctFromCorpus(rng);
+function interrogativeEndPunct(rng: PRNG, q: QualityMix): string {
+  if (rng() < q.punctuationRhythm * 0.18) {
+    return sampleClausePunctFromCorpus(rng) === "!" ? "!" : "?";
   }
-  const pQ =
-    0.1 *
-    (1 - 0.75 * t.template.declarativeBias) *
-    (0.4 + 0.6 * t.template.interrogativeRate);
-  return rng() < 1 - pQ ? "." : "?";
+  return "?";
 }
 
 function maybeCorpusChunkPrefix(
@@ -125,50 +124,52 @@ type Tpl = (
 function buildDeclarativeTemplates(): Tpl[] {
   return [
     (s, r, _m, t, q) =>
-      `${pick(r, RO_DET_INDEF)} ${s.noun()} ${s.verb()} ${pick(r, RO_PREP)} ${pick(r, RO_DET_INDEF)} ${s.noun()}${endPunct(r, t, q)}`,
+      `${pick(r, RO_DET_INDEF)} ${s.noun()} ${s.verb()} ${pick(r, RO_PREP)} ${pick(r, RO_DET_INDEF)} ${s.noun()}${declarativeEndPunct(r, t, q)}`,
     (s, r, m, t, q) =>
-      `dar ${applyDefinite(s.noun(), r, m)} ${pick(r, RO_CONJ)} ${pick(r, RO_PRON_SUBJ)} ${s.verb()}${endPunct(r, t, q)}`,
+      `dar ${applyDefinite(s.noun(), r, m)}, ${pick(r, RO_CONJ_COMMA)} ${pick(r, RO_PRON_SUBJ)} ${s.verb()}${declarativeEndPunct(r, t, q)}`,
     (s, r, m, t, q) =>
-      `${capitalizeRo(pick(r, RO_PREP))} ${applyDefinite(s.noun(), r, m)} ${pick(r, RO_PRON_SUBJ)} ${pick(r, RO_AUX)} ${s.adj()}${endPunct(r, t, q)}`,
+      `${capitalizeRo(pick(r, RO_PREP))} ${applyDefinite(s.noun(), r, m)} ${pick(r, RO_PRON_SUBJ)} ${pick(r, RO_AUX)} ${s.adj()}${declarativeEndPunct(r, t, q)}`,
     (s, r, m, t, q) =>
-      `nu ${pick(r, RO_PRON_SUBJ)} ${s.verb()} ${pick(r, RO_PREP)} ${applyDefinite(s.noun(), r, m)}${endPunct(r, t, q)}`,
+      `nu ${pick(r, RO_PRON_SUBJ)} ${s.verb()} ${pick(r, RO_PREP)} ${applyDefinite(s.noun(), r, m)}${declarativeEndPunct(r, t, q)}`,
     (s, r, _m, t, q) =>
-      `fie ${s.noun()}, fie ${s.noun()}, ${pick(r, RO_PRON_SUBJ)} ${pick(r, RO_AUX)} ${s.adj()}${endPunct(r, t, q)}`,
+      `fie ${s.noun()}, fie ${s.noun()}, ${pick(r, RO_PRON_SUBJ)} ${pick(r, RO_AUX)} ${s.adj()}${declarativeEndPunct(r, t, q)}`,
     (s, r, _m, t, q) =>
-      `${pick(r, RO_DEM)} ${s.noun()} ${pick(r, RO_CONJ)} ${pick(r, RO_DET_INDEF)} ${s.noun()} ${s.verb()}${endPunct(r, t, q)}`,
+      `${pick(r, RO_DEM)} ${s.noun()} ${pick(r, RO_CONJ_NO_COMMA)} ${pick(r, RO_DET_INDEF)} ${s.noun()} ${s.verb()}${declarativeEndPunct(r, t, q)}`,
     (s, r, m, t, q) =>
-      `${capitalizeRo(applyDefinite(s.noun(), r, m))} ${s.verb()} ${pick(r, RO_PREP)} ${s.noun()}, ${pick(r, RO_CONJ)} ${s.verb()}${endPunct(r, t, q)}`,
+      `${capitalizeRo(applyDefinite(s.noun(), r, m))} ${s.verb()} ${pick(r, RO_PREP)} ${s.noun()}, ${pick(r, RO_CONJ_COMMA)} ${s.verb()}${declarativeEndPunct(r, t, q)}`,
     (s, r, m, t, q) =>
-      `au ${s.verb()} ${applyPlural(s.noun(), r, m)} ${pick(r, RO_PREP)} ${applyDefinite(s.noun(), r, m)}${endPunct(r, t, q)}`,
+      `au ${s.verb()} ${applyPlural(s.noun(), r, m)} ${pick(r, RO_PREP)} ${applyDefinite(s.noun(), r, m)}${declarativeEndPunct(r, t, q)}`,
     (s, r, m, t, q) =>
-      `${capitalizeRo(applyPlural(s.noun(), r, m))} ${pick(r, RO_COPULA_FIN)} ${s.adj()}, ${pick(r, RO_CONJ)} ${applyDefinite(s.noun(), r, m)} nu ${s.verb()}${endPunct(r, t, q)}`,
+      `${capitalizeRo(applyPlural(s.noun(), r, m))} ${pick(r, RO_COPULA_FIN)} ${s.adj()}, ${pick(r, RO_CONJ_COMMA)} ${applyDefinite(s.noun(), r, m)} nu ${s.verb()}${declarativeEndPunct(r, t, q)}`,
     (s, r, _m, t, q) =>
-      `în ${s.noun()}, ${pick(r, RO_DET_INDEF)} ${s.noun()} ${s.verb()} mereu${endPunct(r, t, q)}`,
+      `în ${s.noun()}, ${pick(r, RO_DET_INDEF)} ${s.noun()} ${s.verb()} mereu${declarativeEndPunct(r, t, q)}`,
     (s, r, m, t, q) =>
-      `pentru ${s.noun()}, ${pick(r, RO_PRON_SUBJ)} ${s.verb()} ${pick(r, RO_PREP)} ${applyDefinite(s.noun(), r, m)}${endPunct(r, t, q)}`,
+      `pentru ${s.noun()}, ${pick(r, RO_PRON_SUBJ)} ${s.verb()} ${pick(r, RO_PREP)} ${applyDefinite(s.noun(), r, m)}${declarativeEndPunct(r, t, q)}`,
     (s, r, m, t, q) =>
-      `${capitalizeRo(s.adj())}! ${capitalizeRo(pick(r, RO_DET_INDEF))} ${applyDefinite(s.noun(), r, m)} nu ${s.verb()}${endPunct(r, t, q)}`,
+      `${capitalizeRo(s.adj())}! ${capitalizeRo(pick(r, RO_DET_INDEF))} ${applyDefinite(s.noun(), r, m)} nu ${s.verb()}${declarativeEndPunct(r, t, q)}`,
     (s, r, _m, t, q) =>
-      `${pick(r, RO_DET_INDEF)} ${s.adj()} ${s.noun()} ${s.verb()} ${pick(r, RO_PREP)} ${pick(r, RO_DET_INDEF)} ${s.noun()}${endPunct(r, t, q)}`,
+      `${pick(r, RO_DET_INDEF)} ${s.adj()} ${s.noun()} ${s.verb()} ${pick(r, RO_PREP)} ${pick(r, RO_DET_INDEF)} ${s.noun()}${declarativeEndPunct(r, t, q)}`,
     (s, r, _m, t, q) =>
-      `${pick(r, RO_PRON_SUBJ)} ${s.verb()} ${pick(r, RO_DET_INDEF)} ${s.adj()} ${s.noun()} ${pick(r, RO_CONJ)} ${pick(r, RO_PRON_SUBJ)} ${s.verb()}${endPunct(r, t, q)}`,
+      `${pick(r, RO_PRON_SUBJ)} ${s.verb()} ${pick(r, RO_DET_INDEF)} ${s.adj()} ${s.noun()}, ${pick(r, RO_CONJ_COMMA)} ${pick(r, RO_PRON_SUBJ)} ${s.verb()}${declarativeEndPunct(r, t, q)}`,
+    (s, r, _m, t, q) =>
+      `${s.noun()} ${s.verb()}, ${pick(r, RO_SUBORD_AFTER_COMMA)} ${pick(r, RO_PRON_SUBJ)} ${s.verb()}${declarativeEndPunct(r, t, q)}`,
   ];
 }
 
 function buildInterrogativeTemplates(): Tpl[] {
   return [
-    (s, r, _m, t, q) =>
-      `${pick(r, RO_Q)} ${s.verb()} ${pick(r, RO_PREP)} ${pick(r, RO_DET_INDEF)} ${s.noun()}${endPunct(r, t, q)}`,
-    (s, r, _m, t, q) =>
-      `când ${pick(r, RO_PRON_SUBJ)} ${s.verb()}, ${pick(r, RO_DET_INDEF)} ${s.noun()} ${pick(r, RO_AUX)} ${s.adj()}${endPunct(r, t, q)}`,
-    (s, r, m, t, q) =>
-      `${pick(r, RO_Q)} ${pick(r, RO_AUX)} ${s.adj()} ${applyDefinite(s.noun(), r, m)}${endPunct(r, t, q)}`,
-    (s, r, _m, t, q) =>
-      `dacă ${pick(r, RO_PRON_SUBJ)} ${s.verb()}, atunci ${pick(r, RO_DET_INDEF)} ${s.noun()} ${pick(r, RO_AUX)} ${s.adj()}${endPunct(r, t, q)}`,
-    (s, r, _m, t, q) =>
-      `unde ${s.verb()} ${pick(r, RO_DET_INDEF)} ${s.noun()} ${pick(r, RO_PREP)} ${s.noun()}${endPunct(r, t, q)}`,
-    (s, r, m, t, q) =>
-      `care dintre ${applyPlural(s.noun(), r, m)} ${pick(r, RO_AUX)} mai ${s.adj()}${endPunct(r, t, q)}`,
+    (s, r, _m, _t, q) =>
+      `${pick(r, RO_Q)} ${s.verb()} ${pick(r, RO_PREP)} ${pick(r, RO_DET_INDEF)} ${s.noun()}${interrogativeEndPunct(r, q)}`,
+    (s, r, _m, _t, q) =>
+      `când ${pick(r, RO_PRON_SUBJ)} ${s.verb()}, ${pick(r, RO_DET_INDEF)} ${s.noun()} ${pick(r, RO_AUX)} ${s.adj()}${interrogativeEndPunct(r, q)}`,
+    (s, r, m, _t, q) =>
+      `${pick(r, RO_Q)} ${pick(r, RO_AUX)} ${s.adj()} ${applyDefinite(s.noun(), r, m)}${interrogativeEndPunct(r, q)}`,
+    (s, r, _m, _t, q) =>
+      `dacă ${pick(r, RO_PRON_SUBJ)} ${s.verb()}, atunci ${pick(r, RO_DET_INDEF)} ${s.noun()} ${pick(r, RO_AUX)} ${s.adj()}${interrogativeEndPunct(r, q)}`,
+    (s, r, _m, _t, q) =>
+      `unde ${s.verb()} ${pick(r, RO_DET_INDEF)} ${s.noun()} ${pick(r, RO_PREP)} ${s.noun()}${interrogativeEndPunct(r, q)}`,
+    (s, r, m, _t, q) =>
+      `care dintre ${applyPlural(s.noun(), r, m)} ${pick(r, RO_AUX)} mai ${s.adj()}${interrogativeEndPunct(r, q)}`,
   ];
 }
 
@@ -318,7 +319,7 @@ function runSentenceRo(
     }
   }
   const merged = maybeCorpusChunkPrefix(roModel, rng, q, bestRaw);
-  return { text: capitalizeSentence(merged), meta: bestMeta };
+  return { text: finalizeRomanianParagraph(merged, roModel, rng), meta: bestMeta };
 }
 
 export function generateSentenceRo(

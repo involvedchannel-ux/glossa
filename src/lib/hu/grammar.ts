@@ -7,6 +7,31 @@ const HU_MULTIGRAPH_SET = new Set<string>(HU_DIGRAPHS as unknown as string[]);
 
 /** Palatal letters (always consonantal); in filler words **ly** etc. must not start a CC cluster. */
 const PALATAL_FOLLOW_VOWEL_DIGRAPHS = new Set(["gy", "ly", "ny", "ty"]);
+const HU_ARCHAIC_NAME_PAIRS = new Set(["th", "cz"]);
+const HU_DISPREFERRED_FINAL_CLUSTERS = new Set(["mz"]);
+const HU_CASE_SUFFIXES = [
+  "ban",
+  "ben",
+  "ba",
+  "be",
+  "ról",
+  "ről",
+  "hoz",
+  "hez",
+  "höz",
+  "nál",
+  "nél",
+  "tól",
+  "től",
+  "ból",
+  "ből",
+  "on",
+  "en",
+  "ön",
+  "án",
+  "ra",
+  "re",
+];
 
 /** Standalone `y` is excluded from regular generated Hungarian lexemes (reserved for names/foreign forms). */
 export function huHasStandaloneY(toks: readonly string[]): boolean {
@@ -83,8 +108,42 @@ export function huWordHasAtLeastOneVowel(toks: readonly string[]): boolean {
   return toks.some(isHuVowelLetterToken);
 }
 
+function huHasArchaicNameLikePairs(toks: readonly string[]): boolean {
+  for (let i = 0; i + 1 < toks.length; i++) {
+    const pair = `${toks[i] ?? ""}${toks[i + 1] ?? ""}`;
+    if (HU_ARCHAIC_NAME_PAIRS.has(pair)) return true;
+  }
+  return false;
+}
+
+function huHasStackedCaseSuffixEnding(toks: readonly string[]): boolean {
+  if (toks.length < 4) return false;
+  const w = toks.join("");
+  for (const s1 of HU_CASE_SUFFIXES) {
+    if (!w.endsWith(s1)) continue;
+    const stem = w.slice(0, -s1.length);
+    if (stem.length < 2) continue;
+    for (const s2 of HU_CASE_SUFFIXES) {
+      if (stem.endsWith(s2)) return true;
+    }
+  }
+  return false;
+}
+
+function huHasDispreferredFinalCluster(toks: readonly string[]): boolean {
+  if (toks.length < 2) return false;
+  const a = toks[toks.length - 2]!;
+  const b = toks[toks.length - 1]!;
+  if (a.length !== 1 || b.length !== 1) return false;
+  if (isHuVowelLetterToken(a) || isHuVowelLetterToken(b)) return false;
+  return HU_DISPREFERRED_FINAL_CLUSTERS.has(`${a}${b}`);
+}
+
 export function huPhonotacticConstraintsOk(toks: readonly string[]): boolean {
   if (huHasStandaloneY(toks)) return false;
+  if (huHasArchaicNameLikePairs(toks)) return false;
+  if (huHasStackedCaseSuffixEnding(toks)) return false;
+  if (huHasDispreferredFinalCluster(toks)) return false;
   if (huHasAdjacentMultigraphs(toks)) return false;
   if (!huOnsetConsonantCapOk(toks)) return false;
   if (!huPalatalDigraphMustPrecedeVowelWhenContinued(toks)) return false;

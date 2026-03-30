@@ -1,6 +1,6 @@
 import { validateHuContentWord, type CorpusRuntimeModel } from "../corpusModel";
 import type { PRNG } from "../markov";
-import { HU_CASE_SUFFIX, HU_POSTPOSITION } from "./closedClass";
+import { HU_POSTPOSITION } from "./closedClass";
 
 const C_SINGLE = "ptkcsrdfgmnlbvjhzr".split("");
 const C_CLUSTER = ["sz", "zs", "cs", "gy", "ny", "ty", "ly", "dz"];
@@ -21,6 +21,15 @@ const NOUN_END_WEIGHTED = [
   "ü",
   "ű",
 ];
+
+const HU_BACK_VOWELS = new Set(["a", "á", "o", "ó", "u", "ú"]);
+const HU_FRONT_ROUNDED_VOWELS = new Set(["ö", "ő", "ü", "ű"]);
+const HU_FRONT_UNROUNDED_VOWELS = new Set(["e", "é", "i", "í"]);
+const HU_ALL_VOWELS = new Set([
+  ...HU_BACK_VOWELS,
+  ...HU_FRONT_ROUNDED_VOWELS,
+  ...HU_FRONT_UNROUNDED_VOWELS,
+]);
 
 function shuffleInPlace<T>(a: T[], rng: PRNG): void {
   for (let i = a.length - 1; i > 0; i--) {
@@ -47,6 +56,36 @@ function syllable(rng: PRNG, needOnset: boolean, posSalience: number): string {
     s += C_SINGLE[Math.floor(rng() * C_SINGLE.length)]!;
   }
   return s;
+}
+
+function lastVowelOf(word: string): string | null {
+  const g = [...word.normalize("NFC").toLowerCase()];
+  for (let i = g.length - 1; i >= 0; i--) {
+    const ch = g[i]!;
+    if (HU_ALL_VOWELS.has(ch)) return ch;
+  }
+  return null;
+}
+
+function isBackWord(word: string): boolean {
+  const g = [...word.normalize("NFC").toLowerCase()];
+  return g.some((ch) => HU_BACK_VOWELS.has(ch));
+}
+
+function chooseHarmonic2(word: string, back: string, front: string): string {
+  return isBackWord(word) ? back : front;
+}
+
+function chooseHarmonic3(
+  word: string,
+  back: string,
+  frontUnrounded: string,
+  frontRounded: string,
+): string {
+  if (isBackWord(word)) return back;
+  const lv = lastVowelOf(word);
+  if (lv && HU_FRONT_ROUNDED_VOWELS.has(lv)) return frontRounded;
+  return frontUnrounded;
 }
 
 export function fakeStem(rng: PRNG, posSalience: number): string {
@@ -85,7 +124,9 @@ export function applyDefiniteHu(
   rng: PRNG,
   m: CorpusRuntimeModel | null,
 ): string {
-  const opts = [`${lemma}t`, `${lemma}at`, `${lemma}ban`];
+  const accusative = chooseHarmonic3(lemma, "ot", "et", "öt");
+  const inessive = chooseHarmonic2(lemma, "ban", "ben");
+  const opts = [`${lemma}t`, `${lemma}${accusative}`, `${lemma}${inessive}`];
   shuffleInPlace(opts, rng);
   for (const o of opts) {
     if (validateHuContentWord(m, o)) return o;
@@ -98,7 +139,8 @@ export function applyPluralHu(
   rng: PRNG,
   m: CorpusRuntimeModel | null,
 ): string {
-  const opts = [`${lemma}k`, `${lemma}ak`, `${lemma}ek`];
+  const plural = chooseHarmonic3(lemma, "ok", "ek", "ök");
+  const opts = [`${lemma}k`, `${lemma}${plural}`, `${lemma}ak`];
   shuffleInPlace(opts, rng);
   for (const o of opts) {
     if (validateHuContentWord(m, o)) return o;
@@ -119,7 +161,23 @@ export function fuseNounWithOblique(
     const post = HU_POSTPOSITION[Math.floor(rng() * HU_POSTPOSITION.length)]!;
     return `${lemma} ${post}`;
   }
-  const suf = HU_CASE_SUFFIX[Math.floor(rng() * HU_CASE_SUFFIX.length)]!;
+  const casePicker = Math.floor(rng() * 8);
+  const suf =
+    casePicker === 0
+      ? chooseHarmonic2(lemma, "ban", "ben")
+      : casePicker === 1
+        ? chooseHarmonic2(lemma, "ba", "be")
+        : casePicker === 2
+          ? chooseHarmonic2(lemma, "ról", "ről")
+          : casePicker === 3
+            ? chooseHarmonic3(lemma, "hoz", "hez", "höz")
+            : casePicker === 4
+              ? chooseHarmonic2(lemma, "nál", "nél")
+              : casePicker === 5
+                ? chooseHarmonic2(lemma, "tól", "től")
+                : casePicker === 6
+                  ? chooseHarmonic2(lemma, "ból", "ből")
+                  : chooseHarmonic3(lemma, "on", "en", "ön");
   const variants = [lemma + suf];
   for (const v of ["a", "e", "o"]) {
     variants.push(lemma + v + suf);

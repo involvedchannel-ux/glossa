@@ -17,6 +17,8 @@ import {
   HU_AUX,
   HU_CONJ,
   HU_COP,
+  HU_DEM,
+  HU_DET,
   HU_PRON,
   HU_Q,
   HU_SUBORD_AFTER_COMMA,
@@ -47,6 +49,85 @@ type PickPools = {
 type TemplatePickMeta =
   | { pool: "decl" | "int"; index: number }
   | { pool: "markov" | "surgery"; index: number };
+
+function clamp01(x: number): number {
+  if (x < 0) return 0;
+  if (x > 1) return 1;
+  return x;
+}
+
+/**
+ * Bias quality sliders toward "convincing Hungarian-like prose":
+ * more surgery + reranking, less pure Markov drift.
+ */
+function realismAdjustedQualityHu(q: QualityMix): QualityMix {
+  return {
+    corpusChunks: clamp01(q.corpusChunks * 0.45),
+    pieceBuiltLemmas: clamp01(0.5 * q.pieceBuiltLemmas + 0.45),
+    corpusRhythm: clamp01(q.corpusRhythm * 0.15),
+    sentenceSurgery: clamp01(0.6 * q.sentenceSurgery + 0.4),
+    multiCandidate: clamp01(0.25 * q.multiCandidate + 0.75),
+    punctuationRhythm: clamp01(0.5 * q.punctuationRhythm + 0.2),
+  };
+}
+
+const HU_FUNCTION_WORD_SET = new Set(
+  [
+    ...HU_AUX,
+    ...HU_CONJ,
+    ...HU_COP,
+    ...HU_DET,
+    ...HU_DEM,
+    ...HU_PRON,
+    ...HU_Q,
+    ...HU_SUBORD_AFTER_COMMA,
+    ...HU_SUBORD_SENTENCE_INITIAL,
+    "is",
+    "nem",
+    "se",
+    "sem",
+  ].map((s) => s.toLowerCase()),
+);
+
+function huFunctionWordRatio(words: readonly string[]): number {
+  if (words.length === 0) return 0;
+  const n = words.filter((w) => HU_FUNCTION_WORD_SET.has(w)).length;
+  return n / words.length;
+}
+
+function huFunctionWordRatioFromText(text: string): number {
+  const words = text
+    .normalize("NFC")
+    .toLowerCase()
+    .split(/\s+/u)
+    .map((w) => w.replace(/^[,.;:!?…]+|[,.;:!?…]+$/gu, ""))
+    .filter(Boolean);
+  return huFunctionWordRatio(words);
+}
+
+function huNaturalnessScore(text: string): number {
+  const raw = text.normalize("NFC");
+  const words = raw
+    .toLowerCase()
+    .split(/\s+/u)
+    .map((w) => w.replace(/^[,.;:!?…]+|[,.;:!?…]+$/gu, ""))
+    .filter(Boolean);
+  if (words.length === 0) return -12;
+  let s = 0;
+  const functionRatio = huFunctionWordRatio(words);
+  if (functionRatio < 0.2) return -20;
+  if (functionRatio < 0.28) s -= 6;
+  if (functionRatio > 0.68) s -= 2;
+  if (/, (és|de|pedig|vagy|mert)\b/iu.test(raw)) s += 2.2;
+  if (/,\s+(hogy|mert|bár|noha|miközben|mintha|ahogy|amíg|ameddig)\b/iu.test(raw)) {
+    s += 1.8;
+  }
+  if (/\b(és|de|pedig|vagy|mert)\s*$/iu.test(raw)) s -= 6;
+  if (/[A-ZÁÉÍÓÖŐÚÜŰ]/u.test(raw.replace(/^[A-ZÁÉÍÓÖŐÚÜŰ]/u, ""))) s -= 2;
+  const nonHu = raw.match(/[^ \n\r\t.,;:!?…a-zA-ZáéíóöőúüűÁÉÍÓÖŐÚÜŰ-]/gu);
+  if (nonHu && nonHu.length > 0) s -= 3 + nonHu.length * 0.4;
+  return s;
+}
 
 function makePoolPicker<T>(
   pool: readonly T[],
@@ -335,10 +416,12 @@ function produceOneSentenceHu(
       rng,
       5 + Math.floor(rng() * 9),
     );
-    return {
-      raw,
-      meta: { pool: "markov", index: Math.floor(rng() * 1e9) },
-    };
+    if (huFunctionWordRatioFromText(raw) >= 0.16) {
+      return {
+        raw,
+        meta: { pool: "markov", index: Math.floor(rng() * 1e9) },
+      };
+    }
   }
   if (huModel && rng() < quality.sentenceSurgery) {
     const raw = sentenceFromSurgery(
@@ -349,10 +432,12 @@ function produceOneSentenceHu(
       pools.adj,
       quality.sentenceSurgery,
     );
-    return {
-      raw,
-      meta: { pool: "surgery", index: Math.floor(rng() * 1e9) },
-    };
+    if (huFunctionWordRatioFromText(raw) >= 0.16) {
+      return {
+        raw,
+        meta: { pool: "surgery", index: Math.floor(rng() * 1e9) },
+      };
+    }
   }
   const { tpl, meta } = pickTemplateWithAvoid(rng, tuning, avoid);
   const raw = tpl(pools, rng, huModel, tuning, quality);
@@ -367,7 +452,7 @@ function runSentenceHu(
   avoid: TemplatePickMeta | null,
   quality: QualityMix,
 ): { text: string; meta: TemplatePickMeta } {
-  const q = normalizeQualityMix(quality);
+  const q = realismAdjustedQualityHu(normalizeQualityMix(quality));
   const pools = buildPickers(
     lex,
     rng,
@@ -388,7 +473,8 @@ function runSentenceHu(
       avoid,
       q,
     );
-    const sc = huModel ? scoreSentenceByModel(huModel, raw) : 0;
+    const scModel = huModel ? scoreSentenceByModel(huModel, raw) : 0;
+    const sc = scModel + huNaturalnessScore(raw) * 2.4;
     if (sc > bestScore) {
       bestScore = sc;
       bestRaw = raw;

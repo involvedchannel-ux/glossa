@@ -3,9 +3,11 @@ import type { PRNG } from "../markov";
 /** Curated closed-class Romanian (real words). Purity 1 = only these + lexicon slots. */
 export const RO_CONJ = [
   "și",
+  "sau",
   "dar",
   "însă",
   "ori",
+  "ci",
   "deci",
   "că",
   "dacă",
@@ -14,6 +16,15 @@ export const RO_CONJ = [
   "deși",
   "iar",
 ];
+
+/** Coordinators that typically do NOT require comma when linking simple peers. */
+export const RO_CONJ_NO_COMMA = ["și", "sau", "ori"];
+
+/** Adversative/conclusive coordinators commonly preceded by comma between clauses. */
+export const RO_CONJ_COMMA = ["dar", "însă", "iar", "ci", "deci"];
+
+/** Subordinators commonly attached to a matrix clause with a comma boundary in templates. */
+export const RO_SUBORD_AFTER_COMMA = ["că", "dacă", "deși", "întrucât", "fiindcă"];
 
 export const RO_PREP = [
   "în",
@@ -55,6 +66,42 @@ export const RO_Q = [
   "care",
   "de ce",
 ];
+
+/** Interrogative starters that should end with `?` in finalization. */
+export const RO_REQUIRES_QUESTION_MARK_INITIAL = new Set(
+  [
+    "ce",
+    "cine",
+    "cum",
+    "când",
+    "unde",
+    "cât",
+    "care",
+    "de ce",
+  ].map((s) => s.toLowerCase()),
+);
+
+/** Fallback forbidden sentence-final dependents for template/corpus cleanup. */
+export const RO_FORBIDDEN_SENTENCE_FINAL = new Set(
+  [
+    "și",
+    "sau",
+    "ori",
+    "dar",
+    "însă",
+    "întrucât",
+    "fiindcă",
+    "că",
+    "dacă",
+    "deși",
+    "iar",
+    "ci",
+    "deci",
+    "fie",
+    "nici",
+    "precum",
+  ].map((s) => s.toLowerCase()),
+);
 
 export const RO_AUX = [
   "e",
