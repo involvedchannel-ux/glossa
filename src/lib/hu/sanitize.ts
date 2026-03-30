@@ -21,6 +21,24 @@ function forbiddenHuFinalUnion(m: CorpusRuntimeModel | null): Set<string> {
   return u;
 }
 
+const HU_SURFACE_WORD_RE = /^[aábcdeéfghiíjklmnoóöőpqrstuúüűvwxz]+$/u;
+
+function splitEdgePunctuation(word: string): {
+  lead: string;
+  core: string;
+  trail: string;
+} {
+  let a = 0;
+  let b = word.length;
+  while (a < b && !/[\p{L}]/u.test(word[a]!)) a++;
+  while (b > a && !/[\p{L}]/u.test(word[b - 1]!)) b--;
+  return {
+    lead: word.slice(0, a),
+    core: word.slice(a, b),
+    trail: word.slice(b),
+  };
+}
+
 function firstSentenceWordKey(sentenceBody: string): string {
   const trimmed = sentenceBody.trim();
   if (!trimmed) return "";
@@ -72,6 +90,21 @@ export function finalizeHungarianSentence(
   }
 
   if (words.length === 0) return ".";
+
+  for (let i = 0; i < words.length; i++) {
+    const { lead, core, trail } = splitEdgePunctuation(words[i]!);
+    if (!core) continue;
+    let fixedCore = core.normalize("NFC").toLowerCase();
+    if (!HU_SURFACE_WORD_RE.test(fixedCore)) {
+      if (m) {
+        fixedCore = genWordFromCorpus(m, rng, 2, maxG);
+      } else {
+        fixedCore = fixedCore.replace(/[^aábcdeéfghiíjklmnoóöőpqrstuúüűvwxz]/gu, "");
+      }
+    }
+    if (!fixedCore) continue;
+    words[i] = `${lead}${fixedCore}${trail}`;
+  }
 
   const joined = words.join(" ");
   const mustQuestion = HU_REQUIRES_QUESTION_MARK_INITIAL.has(

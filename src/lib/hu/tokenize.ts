@@ -14,7 +14,7 @@ export const HU_DIGRAPHS = [
 ] as const;
 
 export const HU_SINGLE_LETTERS = new Set(
-  "aábcdeéfghiíjklmnoóöőpqrstuúüűvwxyz".split(""),
+  "aábcdeéfghiíjklmnoóöőpqrstuúüűvwxz".split(""),
 );
 
 export function tokenizeHungarian(text: string): string[] {

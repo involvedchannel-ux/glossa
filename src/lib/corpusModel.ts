@@ -473,7 +473,12 @@ export function canAppendRoCore(
   roVowelPairSet: Set<string>,
 ): boolean {
   if (next === " " || next === "\n") {
-    return wordChars.length >= minLen;
+    if (wordChars.length < minLen) return false;
+    // Require at least one vowel before the word is considered finished.
+    for (const ch of wordChars) {
+      if (isVowelRo(ch)) return true;
+    }
+    return false;
   }
   const v = isVowelRo(next);
   const ev = endVowelRunRo(wordChars);
@@ -592,6 +597,16 @@ function sampleNextHu(
 
 function validateRoWord(m: CorpusRuntimeModel, w: string): boolean {
   if (w.length < 2) return false;
+  // Romanian words almost always contain at least one vowel.
+  // Without this, the corpus/Markov path can emit consonant-only tokens like "tr".
+  let hasVowel = false;
+  for (const ch of w) {
+    if (isVowelRo(ch)) {
+      hasVowel = true;
+      break;
+    }
+  }
+  if (!hasVowel) return false;
   const f = w[0];
   const l = w[w.length - 1];
   if (f && m.first.size > 0 && !m.first.has(f)) return false;
@@ -703,7 +718,7 @@ export function validateHuContentWord(
     opts?.maxGraphemes ??
     (m && m.language === "hu" ? m.maxWordGraphemes : 14);
   const t = w.normalize("NFC").toLowerCase();
-  if (!/^[aábcdeéfghiíjklmnoóöőpqrstuúüűvwxyz]+$/u.test(t)) return false;
+  if (!/^[aábcdeéfghiíjklmnoóöőpqrstuúüűvwxz]+$/u.test(t)) return false;
   const toks = tokenizeHungarianWord(t);
   if (!toks || toks.length < 2) return false;
   if (!huContentWordShapeOk(toks)) return false;

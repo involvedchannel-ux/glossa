@@ -8,6 +8,11 @@ const HU_MULTIGRAPH_SET = new Set<string>(HU_DIGRAPHS as unknown as string[]);
 /** Palatal letters (always consonantal); in filler words **ly** etc. must not start a CC cluster. */
 const PALATAL_FOLLOW_VOWEL_DIGRAPHS = new Set(["gy", "ly", "ny", "ty"]);
 
+/** Standalone `y` is excluded from regular generated Hungarian lexemes (reserved for names/foreign forms). */
+export function huHasStandaloneY(toks: readonly string[]): boolean {
+  return toks.includes("y");
+}
+
 /** No more than this many consonant **tokens** before the first vowel token (digraphs = one token). */
 export const HU_MAX_INITIAL_CONSONANT_TOKENS = 2;
 
@@ -79,6 +84,7 @@ export function huWordHasAtLeastOneVowel(toks: readonly string[]): boolean {
 }
 
 export function huPhonotacticConstraintsOk(toks: readonly string[]): boolean {
+  if (huHasStandaloneY(toks)) return false;
   if (huHasAdjacentMultigraphs(toks)) return false;
   if (!huOnsetConsonantCapOk(toks)) return false;
   if (!huPalatalDigraphMustPrecedeVowelWhenContinued(toks)) return false;
@@ -91,6 +97,7 @@ export function canAppendHuPhonotactic(
   nextTok: string,
 ): boolean {
   if (nextTok === " ") return true;
+  if (nextTok === "y") return false;
   const prev = wordToks.length ? wordToks[wordToks.length - 1] : undefined;
   if (
     prev &&
