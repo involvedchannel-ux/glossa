@@ -5,6 +5,9 @@ const HU_VOWEL_LETTERS = new Set("aáeéiíoóöőuúüű".split(""));
 
 const HU_MULTIGRAPH_SET = new Set<string>(HU_DIGRAPHS as unknown as string[]);
 
+/** Palatal letters (always consonantal); in filler words **ly** etc. must not start a CC cluster. */
+const PALATAL_FOLLOW_VOWEL_DIGRAPHS = new Set(["gy", "ly", "ny", "ty"]);
+
 /** No more than this many consonant **tokens** before the first vowel token (digraphs = one token). */
 export const HU_MAX_INITIAL_CONSONANT_TOKENS = 2;
 
@@ -52,9 +55,34 @@ export function huOnsetConsonantCapOk(toks: readonly string[]): boolean {
   );
 }
 
+/**
+ * After **gy, ly, ny, ty** the next letter must be a vowel if there is a next token
+ * (*lyuk*, *Nyúl* — OK; *lyl*, *lyt…* — invalid for Glossa orthography).
+ * Word-final palatal digraph (*oly*) is allowed.
+ */
+export function huPalatalDigraphMustPrecedeVowelWhenContinued(
+  toks: readonly string[],
+): boolean {
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i]!;
+    if (!PALATAL_FOLLOW_VOWEL_DIGRAPHS.has(t)) continue;
+    const next = toks[i + 1];
+    if (next === undefined) continue;
+    if (!isHuVowelLetterToken(next)) return false;
+  }
+  return true;
+}
+
+/** Hungarian lexical words contain at least one vowel letter (no vowelless *lyl*-type strings). */
+export function huWordHasAtLeastOneVowel(toks: readonly string[]): boolean {
+  return toks.some(isHuVowelLetterToken);
+}
+
 export function huPhonotacticConstraintsOk(toks: readonly string[]): boolean {
   if (huHasAdjacentMultigraphs(toks)) return false;
-  return huOnsetConsonantCapOk(toks);
+  if (!huOnsetConsonantCapOk(toks)) return false;
+  if (!huPalatalDigraphMustPrecedeVowelWhenContinued(toks)) return false;
+  return true;
 }
 
 /** Inline generation: reject append if the trial prefix would violate phonotactics. */
@@ -63,6 +91,14 @@ export function canAppendHuPhonotactic(
   nextTok: string,
 ): boolean {
   if (nextTok === " ") return true;
+  const prev = wordToks.length ? wordToks[wordToks.length - 1] : undefined;
+  if (
+    prev &&
+    PALATAL_FOLLOW_VOWEL_DIGRAPHS.has(prev) &&
+    !isHuVowelLetterToken(nextTok)
+  ) {
+    return false;
+  }
   return huPhonotacticConstraintsOk([...wordToks, nextTok]);
 }
 
@@ -71,6 +107,7 @@ export function huContentWordShapeOk(toks: readonly string[]): boolean {
   if (huHasIllegalGeminateInitial(toks) || huDispreferredInitialToken(toks)) {
     return false;
   }
+  if (!huWordHasAtLeastOneVowel(toks)) return false;
   return huPhonotacticConstraintsOk(toks);
 }
 

@@ -72,6 +72,42 @@ export const HU_SUBORD_SENTENCE_INITIAL = [
  * Fallback when `hu.json` has no `linguistics.forbiddenFinal` — expand with matrix incompletes.
  * Rebuild JSON via `scripts/build-models.mjs` to persist; keep this list aligned with `linguistic-rules.mjs`.
  */
+/**
+ * Surface forms the **PUA/Markov word generator** must not emit (real closed class / particles).
+ * Templates still insert these deliberately.
+ */
+export const HU_MARKOV_WORD_BLOCKLIST = new Set(
+  [
+    "és",
+    "a",
+    "az",
+    "de",
+    "pedig",
+    "mert",
+    "ha",
+    "hogy",
+    "vagy",
+    "mint",
+    "bár",
+    "hanem",
+    "s",
+    "is",
+    "nem",
+    "csak",
+    "akkor",
+    "így",
+    "mégis",
+    "miközben",
+    "mintha",
+    "ahogy",
+    "amíg",
+    "noha",
+    "illetve",
+    "avagy",
+    "ellenben",
+  ].map((s) => s.toLowerCase()),
+);
+
 export const HU_FORBIDDEN_SENTENCE_FINAL = new Set(
   [
     "a",

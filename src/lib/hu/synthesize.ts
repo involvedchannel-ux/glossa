@@ -22,7 +22,7 @@ import {
   HU_SUBORD_AFTER_COMMA,
   HU_SUBORD_SENTENCE_INITIAL,
 } from "./closedClass";
-import { finalizeHungarianSentence } from "./sanitize";
+import { finalizeHungarianParagraph } from "./sanitize";
 import {
   demonstrativeNounPhrase,
   pickHuDeterminer,
@@ -100,13 +100,13 @@ function maybeCorpusChunkPrefix(
   q: QualityMix,
   sentence: string,
 ): string {
-  if (!m || q.corpusChunks <= 0 || rng() > q.corpusChunks * 0.88) {
+  if (!m || q.corpusChunks <= 0 || rng() > q.corpusChunks * 0.52) {
     return sentence;
   }
   const maxG = m.maxWordGraphemes;
   const w1 = genWordFromCorpus(m, rng, 3, Math.min(8, maxG));
   const w2 = genWordFromCorpus(m, rng, 2, Math.min(7, maxG));
-  return `${w1} ${w2}. ${sentence}`;
+  return `${w1} ${w2}, ${sentence}`;
 }
 
 type Tpl = (
@@ -144,8 +144,12 @@ function buildDeclarativeTemplates(): Tpl[] {
       const obl = fuseNounWithOblique(s.noun(), r, m);
       return `${capitalizeHu(w)} ${s.verb()} ${obl}, ${pick(r, HU_CONJ)} ${s.verb()}${declarativeEndPunct(r, t, q)}`;
     },
-    (s, r, m, t, q) =>
-      `és ${s.verb()} ${applyPluralHu(s.noun(), r, m)} ${fuseNounWithOblique(s.noun(), r, m)}${declarativeEndPunct(r, t, q)}`,
+    (s, r, m, t, q) => {
+      const n1 = s.noun();
+      const n2 = s.noun();
+      const obl = fuseNounWithOblique(s.noun(), r, m);
+      return `${pickHuDeterminer(r, n1)} ${n1} ${s.verb()}, és ${pickHuDeterminer(r, n2)} ${applyPluralHu(n2, r, m)} ${obl}${declarativeEndPunct(r, t, q)}`;
+    },
     (s, r, m, t, q) =>
       `${capitalizeHu(applyPluralHu(s.noun(), r, m))} ${pick(r, HU_COP)} ${s.adj()}, ${pick(r, HU_CONJ)} ${applyDefiniteHu(s.noun(), r, m)} nem ${s.verb()}${declarativeEndPunct(r, t, q)}`,
     (s, r, _m, t, q) => {
@@ -190,6 +194,31 @@ function buildDeclarativeTemplates(): Tpl[] {
       const sub = pick(r, [...HU_SUBORD_SENTENCE_INITIAL]);
       const n1 = s.noun();
       return `${capitalizeHu(sub)} ${pick(r, HU_PRON)} ${s.verb()} ${n1}, ${pick(r, HU_PRON)} ${s.verb()}${declarativeEndPunct(r, t, q)}`;
+    },
+    (s, r, _m, t, q) => {
+      const n1 = s.noun();
+      const n2 = s.noun();
+      return `${pickHuDeterminer(r, n1)} ${n1} ${s.verb()}, és ${pickHuDeterminer(r, n2)} ${n2} ${s.verb()}${declarativeEndPunct(r, t, q)}`;
+    },
+    (s, r, m, t, q) => {
+      const n1 = s.noun();
+      const obl = fuseNounWithOblique(s.noun(), r, m);
+      return `${pickHuDeterminer(r, n1)} ${n1} ${s.verb()}, de ${pick(r, HU_PRON)} ${s.verb()} ${pickHuDeterminer(r, obl)} ${obl}${declarativeEndPunct(r, t, q)}`;
+    },
+    (s, r, _m, t, q) => {
+      const adj = s.adj();
+      const n = s.noun();
+      return `${pickHuDeterminer(r, adj)} ${adj} ${n}, pedig ${pick(r, HU_PRON)} ${pick(r, HU_AUX)} ${s.adj()}${declarativeEndPunct(r, t, q)}`;
+    },
+    (s, r, _m, t, q) => {
+      const n1 = s.noun();
+      const n2 = s.noun();
+      return `${demonstrativeNounPhrase(r, n1)} ${s.verb()}, vagy ${pickHuDeterminer(r, n2)} ${n2} nem ${s.verb()}${declarativeEndPunct(r, t, q)}`;
+    },
+    (s, r, m, t, q) => {
+      const n = s.noun();
+      const obl = fuseNounWithOblique(s.noun(), r, m);
+      return `${pick(r, HU_PRON)} ${s.verb()} ${pickHuDeterminer(r, n)} ${n}, mert ${pickHuDeterminer(r, obl)} ${obl} ${pick(r, HU_AUX)} ${s.adj()}${declarativeEndPunct(r, t, q)}`;
     },
   ];
 }
@@ -368,7 +397,7 @@ function runSentenceHu(
   }
   const merged = maybeCorpusChunkPrefix(huModel, rng, q, bestRaw);
   return {
-    text: finalizeHungarianSentence(merged, huModel, rng),
+    text: finalizeHungarianParagraph(merged, huModel, rng),
     meta: bestMeta,
   };
 }

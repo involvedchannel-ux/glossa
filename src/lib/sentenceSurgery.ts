@@ -1,5 +1,6 @@
 import {
   generateSentenceCorpus,
+  validateHuContentWord,
   type CorpusRuntimeModel,
 } from "./corpusModel";
 import type { PRNG } from "./markov";
@@ -58,6 +59,19 @@ export function sentenceFromSurgery(
           ? pickAdj()
           : pickNoun();
     out.push(lead + fake + trail);
+  }
+  if (m.language === "hu") {
+    const maxG = m.maxWordGraphemes;
+    for (let i = 0; i < out.length; i++) {
+      const { lead, core, trail } = tokenParts(out[i]!);
+      if (!isReplaceableCore(core)) continue;
+      const low = core.normalize("NFC").toLowerCase();
+      if (validateHuContentWord(m, low, { maxGraphemes: maxG })) continue;
+      const slot = i % 5;
+      const fake =
+        slot === 1 ? pickVerb() : slot === 3 ? pickAdj() : pickNoun();
+      out[i] = lead + fake + trail;
+    }
   }
   const joined = out.join(" ");
   const cp = [...joined];

@@ -1,6 +1,10 @@
 import type { LanguageId } from "./language";
 import type { PRNG } from "./markov";
 import {
+  HU_FORBIDDEN_SENTENCE_FINAL,
+  HU_MARKOV_WORD_BLOCKLIST,
+} from "./hu/closedClass";
+import {
   canAppendHuPhonotactic,
   huContentWordShapeOk,
 } from "./hu/grammar";
@@ -85,6 +89,8 @@ export type CorpusRuntimeModel = {
 
 const RO_V = new Set("aăâeioîu".split(""));
 const HU_V = new Set("aáeéiíoóöőuúüű".split(""));
+/** English vowel letters for adjacency / run caps (y counts as vowel for glyph-shape stats). */
+const EN_V = new Set("aeiouy".split(""));
 
 /** Same seed list as `scripts/build-models.mjs` — used when no `ro.json` is loaded. */
 export const RO_VOWEL_PAIR_FALLBACK = new Set(
@@ -110,6 +116,41 @@ export const RO_VOWEL_PAIR_FALLBACK = new Set(
     "oi",
     "au",
     "ou",
+  ].map((p) => p.toLowerCase()),
+);
+
+/** Seed adjacent-vowel pairs when `en.json` is absent — common English spellings. */
+export const EN_VOWEL_PAIR_FALLBACK = new Set(
+  [
+    "aa",
+    "ae",
+    "ai",
+    "ao",
+    "au",
+    "aw",
+    "ay",
+    "ea",
+    "ee",
+    "ei",
+    "eo",
+    "eu",
+    "ew",
+    "ey",
+    "ia",
+    "ie",
+    "io",
+    "iu",
+    "oa",
+    "oe",
+    "oi",
+    "oo",
+    "ou",
+    "ow",
+    "oy",
+    "ua",
+    "ue",
+    "ui",
+    "uy",
   ].map((p) => p.toLowerCase()),
 );
 
@@ -189,14 +230,42 @@ function pickBoostedInitial(m: CorpusRuntimeModel, rng: PRNG, maxG: number): str
   return genWord(m, rng, 2, maxG);
 }
 
+function normalizeHuSurfaceKey(w: string): string {
+  return w
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/^[,.;:!?…]+/gu, "")
+    .replace(/[,.;:!?…]+$/gu, "");
+}
+
+function forbiddenHuFinalSet(m: CorpusRuntimeModel): Set<string> {
+  const u = new Set<string>([...HU_FORBIDDEN_SENTENCE_FINAL]);
+  for (const x of m.linguistics.forbiddenFinal) u.add(x);
+  return u;
+}
+
 function fixForbiddenFinal(
   m: CorpusRuntimeModel,
   words: string[],
   rng: PRNG,
   maxG: number,
 ): void {
+  if (words.length === 0) return;
+  if (m.language === "hu") {
+    const bad = forbiddenHuFinalSet(m);
+    let guard = 0;
+    while (
+      guard++ < 36 &&
+      words.length > 0 &&
+      bad.has(normalizeHuSurfaceKey(words[words.length - 1]!))
+    ) {
+      words[words.length - 1] = genWord(m, rng, 2, maxG);
+    }
+    return;
+  }
+  if (words.length < 2) return;
   const bad = m.linguistics.forbiddenFinal;
-  if (bad.size === 0 || words.length < 2) return;
+  if (bad.size === 0) return;
   let guard = 0;
   while (
     guard++ < 22 &&
@@ -280,6 +349,10 @@ function isVowelRo(ch: string): boolean {
   return RO_V.has(ch);
 }
 
+function isVowelEn(ch: string): boolean {
+  return EN_V.has(ch);
+}
+
 function isVowelHuToken(t: string): boolean {
   if (t === " ") return false;
   if (t.length !== 1) return false;
@@ -303,6 +376,28 @@ function endConsRunRo(w: string): number {
     const c = w[i];
     if (!c || c === " ") break;
     if (isVowelRo(c)) break;
+    n++;
+  }
+  return n;
+}
+
+function endVowelRunEn(w: string): number {
+  let n = 0;
+  for (let i = w.length - 1; i >= 0; i--) {
+    const c = w[i];
+    if (!c || c === " ") break;
+    if (!isVowelEn(c)) break;
+    n++;
+  }
+  return n;
+}
+
+function endConsRunEn(w: string): number {
+  let n = 0;
+  for (let i = w.length - 1; i >= 0; i--) {
+    const c = w[i];
+    if (!c || c === " ") break;
+    if (isVowelEn(c)) break;
     n++;
   }
   return n;
@@ -339,6 +434,34 @@ function puaToTokens(pua: string, m: CorpusRuntimeModel): string[] {
     if (t !== undefined) out.push(t);
   }
   return out;
+}
+
+export function canAppendEnCore(
+  wordChars: string,
+  next: string,
+  minLen: number,
+  maxConsStreak: number,
+  maxVowStreak: number,
+  vowelPairSet: Set<string>,
+): boolean {
+  if (next === " " || next === "\n") {
+    return wordChars.length >= minLen;
+  }
+  const v = isVowelEn(next);
+  const ev = endVowelRunEn(wordChars);
+  const ec = endConsRunEn(wordChars);
+  if (v) {
+    if (ev >= maxVowStreak) return false;
+    if (ev > 0) {
+      const last = wordChars[wordChars.length - 1];
+      if (!last) return false;
+      const pair = last + next;
+      if (!vowelPairSet.has(pair)) return false;
+    }
+  } else if (ec >= maxConsStreak) {
+    return false;
+  }
+  return true;
 }
 
 export function canAppendRoCore(
@@ -517,6 +640,33 @@ export function validateRoContentWord(
   return canAppendRoCore(prefix, " ", minG, maxCons, maxVow, pairs);
 }
 
+/**
+ * ASCII English **content words**: corpus first/last, vowel-pair whitelist, run caps.
+ * When `en.json` is missing, uses `EN_VOWEL_PAIR_FALLBACK` and conservative run caps.
+ */
+export function validateEnContentWord(
+  m: CorpusRuntimeModel | null,
+  w: string,
+  opts?: { minGraphemes?: number; maxGraphemes?: number },
+): boolean {
+  const minG = opts?.minGraphemes ?? 2;
+  const maxG =
+    opts?.maxGraphemes ?? (m ? m.maxWordGraphemes : 14);
+  const t = w.normalize("NFC").toLowerCase();
+  if (!/^[a-z]+$/u.test(t)) return false;
+  const g = [...t];
+  if (g.length < minG || g.length > maxG) return false;
+  const maxCons = 4;
+  const maxVow = 3;
+  const pairs = EN_VOWEL_PAIR_FALLBACK;
+  let prefix = "";
+  for (const ch of g) {
+    if (!canAppendEnCore(prefix, ch, 0, maxCons, maxVow, pairs)) return false;
+    prefix += ch;
+  }
+  return canAppendEnCore(prefix, " ", minG, maxCons, maxVow, pairs);
+}
+
 /** Corpus first/last token bounds only (shape: `huContentWordShapeOk` on Unicode tokens). */
 function validateHuWord(m: CorpusRuntimeModel, puaWord: string): boolean {
   const toks = puaToTokens(puaWord, m);
@@ -618,7 +768,7 @@ function capitalizeFirst(lang: LanguageId, word: string): string {
   if (lang === "hu") {
     return first.toLocaleUpperCase("hu") + cp.slice(1).join("");
   }
-  return first.toLocaleUpperCase() + cp.slice(1).join("");
+  return first.toLocaleUpperCase("en") + cp.slice(1).join("");
 }
 
 function pickFallbackRo(m: CorpusRuntimeModel, rng: PRNG): string {
@@ -780,7 +930,12 @@ function genWordHu(m: CorpusRuntimeModel, rng: PRNG, minLen: number, maxLen: num
     }
     if (validateHuWord(m, w)) {
       const outToks = puaToTokens(w, m);
-      if (huContentWordShapeOk(outToks)) return outToks.join("");
+      if (!huContentWordShapeOk(outToks)) continue;
+      const surface = outToks.join("");
+      if (HU_MARKOV_WORD_BLOCKLIST.has(normalizeHuSurfaceKey(surface))) {
+        continue;
+      }
+      return surface;
     }
   }
   return "szó";
@@ -864,9 +1019,29 @@ export function generateSentenceCorpus(
   for (let i = 0; i < wordCount; i++) {
     words.push(i === 0 ? pickBoostedInitial(m, rng, maxG) : genWord(m, rng, 2, maxG));
   }
-  fixForbiddenFinal(m, words, rng, maxG);
-  applyVisualSubstitutes(words, m, rng);
-  const body = words.join(" ");
+
+  let surfaceWords: string[];
+  if (m.language === "hu" && wordCount >= 7 && rng() < 0.45) {
+    const span = Math.max(1, wordCount - 5);
+    const hi = Math.min(
+      wordCount - 3,
+      Math.max(3, 3 + Math.floor(rng() * span)),
+    );
+    const left = words.slice(0, hi);
+    const right = words.slice(hi);
+    fixForbiddenFinal(m, left, rng, maxG);
+    fixForbiddenFinal(m, right, rng, maxG);
+    surfaceWords = `${left.join(" ")}, és ${right.join(" ")}`
+      .split(/\s+/u)
+      .filter(Boolean);
+    fixForbiddenFinal(m, surfaceWords, rng, maxG);
+  } else {
+    fixForbiddenFinal(m, words, rng, maxG);
+    surfaceWords = words;
+  }
+
+  applyVisualSubstitutes(surfaceWords, m, rng);
+  const body = surfaceWords.join(" ");
   const end = SENTENCE_END.has(body.slice(-1)) ? "" : randomSentenceEnd(rng);
   const raw = body + end;
   const firstSpace = raw.indexOf(" ");
