@@ -134,7 +134,8 @@ export default function App() {
         <div className="app-header-intro">
           <h1 className="app-title">Glossa</h1>
           <p className="app-tagline">
-            Placeholder text for typography — lorem-style samples in Latin, Magyar, and Română.
+            Placeholder text for typography — lorem-style samples in Classic lorem ipsum, Magyar,
+            and Română.
           </p>
         </div>
         <div className="header-toolbar">

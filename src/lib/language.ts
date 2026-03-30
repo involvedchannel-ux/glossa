@@ -1,7 +1,7 @@
 export type LanguageId = "la" | "hu" | "ro";
 
 export const LANGUAGES: { id: LanguageId; label: string; native: string }[] = [
-  { id: "la", label: "Latin", native: "Latin" },
+  { id: "la", label: "Classic lorem ipsum", native: "Classic lorem ipsum" },
   { id: "hu", label: "Hungarian", native: "Magyar" },
   { id: "ro", label: "Romanian", native: "Română" },
 ];
